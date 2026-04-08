@@ -1,0 +1,67 @@
+{
+    "vpnConnection": {
+        "description": "AWS Site-to-Site VPN - Configuration Lab",
+        "customerGateway": {
+            "id": "cgw-XXXXXXXX",
+            "publicIp": "X.X.X.X",
+            "bgpAsn": 65000,
+            "onPremCidr": "192.168.0.0/24"
+        },
+        "virtualPrivateGateway": {
+            "id": "vgw-XXXXXXXX",
+            "bgpAsn": 64512,
+            "awsVpcCidr": "10.0.0.0/16"
+        },
+        "vpnConnectionId": "vpn-XXXXXXXX",
+        "type": "ipsec.1",
+        "tunnels": [
+            {
+                "tunnelId": "tunnel-1",
+                "outsideIpAddress": "AWS-TUNNEL-1-IP",
+                "insideIpAddressCgw": "169.254.10.1/30",
+                "insideIpAddressVgw": "169.254.10.2/30",
+                "preSharedKey": "GENERATED_BY_AWS",
+                "ikeVersion": "ikev2",
+                "phase1": {
+                    "encryption": ["AES256"],
+                    "integrity": ["SHA2-256"],
+                    "dhGroup": [14],
+                    "lifetime": 28800
+                },
+                "phase2": {
+                    "encryption": ["AES256-GCM-16"],
+                    "integrity": ["SHA2-256"],
+                    "dhGroup": [14],
+                    "lifetime": 3600,
+                    "perfectForwardSecrecy": true
+                }
+            },
+            {
+                "tunnelId": "tunnel-2",
+                "outsideIpAddress": "AWS-TUNNEL-2-IP",
+                "insideIpAddressCgw": "169.254.11.1/30",
+                "insideIpAddressVgw": "169.254.11.2/30",
+                "preSharedKey": "GENERATED_BY_AWS",
+                "ikeVersion": "ikev2",
+                "phase1": {
+                    "encryption": ["AES256"],
+                    "integrity": ["SHA2-256"],
+                    "dhGroup": [14],
+                    "lifetime": 28800
+                },
+                "phase2": {
+                    "encryption": ["AES256-GCM-16"],
+                    "integrity": ["SHA2-256"],
+                    "dhGroup": [14],
+                    "lifetime": 3600,
+                    "perfectForwardSecrecy": true
+                }
+            }
+        ],
+        "routing": {
+            "type": "static",
+            "staticRoutes": ["192.168.0.0/24"],
+            "bgpEnabled": false
+        }
+    }
+}
