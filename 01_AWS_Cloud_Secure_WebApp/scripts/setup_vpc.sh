@@ -60,6 +60,7 @@ echo "IGW : $IGW"
 
 echo "=== [4/8] Elastic IP + NAT Gateway ==="
 EIP=$(aws ec2 allocate-address --domain vpc --query 'AllocationId' --output text)
+aws ec2 create-tags --resources "$EIP" --tags Key=Project,Value="$PROJECT" Key=Name,Value="${PROJECT}-NAT-EIP"
 NAT=$(aws ec2 create-nat-gateway --subnet-id $PUB1 --allocation-id $EIP \
   --query 'NatGateway.NatGatewayId' --output text)
 aws ec2 create-tags --resources $NAT --tags Key=Name,Value="${PROJECT}-NAT"
