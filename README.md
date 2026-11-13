@@ -1,143 +1,84 @@
-# AWS Infrastructure & Cloud Security Labs
+# AWS Cloud Security & Infrastructure Labs
 
-A portfolio of **four hands-on AWS labs** covering secure application infrastructure, network connectivity, site-to-site VPN configuration and FinOps automation.
+**Four self-contained engineering exercises** covering cloud security architecture, network connectivity, hybrid VPN and FinOps controls. Designed as a practical portfolio for **Cloud Security, DevSecOps and Systems/Network Engineering**.
 
-> **Current maturity:** this repository contains AWS CLI shell scripts and tutorial READMEs. These are **lab examples, not audited production-ready infrastructure**. Some guide commands point to scripts that are *not* in this repository, and some hard-coded values must be updated before deployment. Review the relevant scripts before issuing any command that creates or deletes AWS resources.
+> **Status: educational AWS CLI scripts, not production IaC.** All deployment scripts require review in a dedicated AWS sandbox. Some actions create billable resources. No AWS environment has been provisioned or verified as part of this repository documentation update.
 
-## Portfolio at a glance
+## Lab directory
 
-| Lab | What it explores | Main AWS services | Technical focus |
-|---|---|---|---|
-| [01 — Secure Web App](01_AWS_Cloud_Secure_WebApp/) | Segmented web application environment | VPC, EC2, ALB, ASG, RDS, WAF | Network isolation and workload security |
-| [02 — Networking](02_AWS_Networking_Lab/) | Private network routing and VPC connections | VPC, Peering, NAT, endpoints | AWS networking and routing |
-| [03 — Site-to-Site VPN](03_AWS_VPN_Site_to_Site/) | Hybrid connection design | VGW, CGW, VPN | Hybrid-cloud connectivity |
-| [04 — Cost Optimization](04_AWS_Cost_Optimization/) | Cost visibility and resource optimization | EC2, EBS, Elastic IP, Cost Explorer | FinOps and safe operations |
+| Lab | Focus | Technologies | Guide |
+| --- | --- | --- | --- |
+| **01 — Secure Web App** | Public/private segmentation, load balancing, compute, protected RDS and optional WAF | VPC, EC2, ALB, RDS, ACM, WAF | [Read guide](01_AWS_Cloud_Secure_WebApp/README.md) |
+| **02 — Networking** | VPC Peering, routes, NAT and private endpoints | VPC, route tables, VPC endpoints | [Read guide](02_AWS_Networking_Lab/README.md) |
+| **03 — Hybrid VPN** | Static-route IPSec connection between an on-prem gateway and AWS | VGW, CGW, AWS VPN | [Read guide](03_AWS_VPN_Site_to_Site/README.md) |
+| **04 — FinOps** | Cost Explorer, CSV reporting, safely scoped cleanup, lifecycle transitions, Spot capacity | Cost Explorer, EC2, S3, EBS | [Read guide](04_AWS_Cost_Optimization/README.md) |
 
-## Architecture — secure application lab
+## Architecture — Lab 01
 
 ```mermaid
 flowchart TB
-  Internet --> ALB[Public Application Load Balancer]
-  ALB --> EC2[EC2 Auto Scaling - private subnets]
-  EC2 --> RDS[RDS MySQL - private subnets]
-  EC2 --> NAT[NAT Gateway - outbound access]
-  VPC[VPC + security groups + route tables] --- ALB
-  VPC --- EC2
-  VPC --- RDS
+  Internet --> ALB[Application Load Balancer]
+  ALB --> APP[Private EC2 Auto Scaling Group]
+  APP --> DB[Private encrypted RDS]
+  APP --> NAT[NAT Gateway for outbound access]
+  WAF[AWS WAF] -. optional .-> ALB
+  ACM[ACM TLS certificate] -. optional .-> ALB
+  VPC[VPC + Security Groups + Route Tables] --- ALB
+  VPC --- APP
+  VPC --- DB
 ```
 
-**Intended security controls:** separation of public/private subnets, security groups restricting application-to-database traffic, optional HTTPS and WAF, EBS encryption and VPC flow logging.
+**Security principles:** layered controls, separation of public and private resources, restrictive security groups, encrypted storage, TLS where configured and controlled IAM roles.
 
-**Important implementation note:** the ALB HTTPS listener is *commented out* in `01_AWS_Cloud_Secure_WebApp/scripts/deploy_ec2.sh`; do not treat HTTPS as configured or operational until an actual ACM certificate and listener have been provided. The main guide currently refers to a `setup_alb_https.sh` helper that does not exist in this repository.
+## Prerequisites
 
-## Directory map
+- A disposable **AWS account or sandbox** with billing alerts and least-privilege IAM.
+- AWS CLI authenticated to the intended account and region.
+- Bash, curl, Python 3 (for CSV/JSON helpers).
+- An explicit cleanup plan and approved budget.
+- Real VPC, subnet, image, key-pair or gateway identifiers where required.
 
-```text
-AWS_Projets/
-├── 01_AWS_Cloud_Secure_WebApp/
-│   ├── README.md
-│   └── scripts/
-│       ├── setup_vpc.sh
-│       ├── deploy_ec2.sh
-│       ├── setup_rds.sh
-│       └── setup_waf.sh
-├── 02_AWS_Networking_Lab/
-│   ├── README.md
-│   └── scripts/
-│       ├── vpc_peering.sh
-│       ├── endpoints.sh
-│       └── nat_gateway.sh
-├── 03_AWS_VPN_Site_to_Site/
-│   ├── README.md
-│   ├── config/vpn_config.json
-│   └── scripts/setup_vpn.sh
-├── 04_AWS_Cost_Optimization/
-│   ├── README.md
-│   └── scripts/
-│       ├── cost_cleanup.sh
-│       └── spot_instances.sh
-└── README.md
-```
-
-## 1 — Secure AWS Web Application
-
-**Goal:** understand the security boundary between a public ingress, private application instances and private database infrastructure.
-
-**Technical concepts:**
-- VPC, two availability zones, public/private subnets and route tables.
-- Internet Gateway and outbound NAT for private compute.
-- ALB + EC2 Auto Scaling, target health checks and an example Flask service.
-- Restricted security groups and encrypted EBS volumes.
-- RDS MySQL and WAF provisioning scripts.
-
-**Practical review points before any execution:** `deploy_ec2.sh` uses a static Amazon Linux 2 AMI ID and a placeholder SSH key name, and assumes the output generated by `setup_vpc.sh`. Validate the AMI in your selected region, check IAM permissions, configure HTTPS and check expected spending. `setup_vpc.sh` assumes a pre-existing IAM role for VPC Flow Logs; without it log delivery may fail.
-
-Read the [lab README](01_AWS_Cloud_Secure_WebApp/README.md) and inspect the scripts, rather than using the original guide as an unattended deployment runbook.
-
-## 2 — AWS Networking Lab
-
-**Goal:** compare internal VPC communication with managed Internet egress and service-private endpoints.
-
-Includes scripts for VPC peering, gateway-based connectivity and NAT. The [lab README](02_AWS_Networking_Lab/README.md) also mentions Transit Gateway and a connectivity test script that are **not implemented as separate scripts in the current tree**.
-
-**Validation ideas:** verify peering status, CIDR non-overlap, both directions of route propagation, DNS resolution and effective security group/NACL policies. Do not infer successful end-to-end network connectivity solely from successful resource creation.
-
-## 3 — AWS Site-to-Site VPN
-
-**Goal:** illustrate the components of hybrid AWS connectivity: Customer Gateway, Virtual Private Gateway, tunnel settings and static routes.
-
-The [VPN setup script](03_AWS_VPN_Site_to_Site/scripts/setup_vpn.sh) creates managed resources and writes the customer device configuration locally. It expects **real VPC, route table and public gateway parameters**—default placeholder values are not deployable. The script uses **static routing**, despite its ASN parameters; this is not a completed BGP deployment.
-
-The guide references a configuration-download script not present in the tree; the actual `setup_vpn.sh` itself exports the configuration XML under `/tmp/vpn_customer_config.xml`.
-
-**Security consideration:** VPN configuration material may contain sensitive tunnel parameters. Do not commit exported customer configuration or credentials to Git.
-
-## 4 — AWS Cost Optimization
-
-**Goal:** explore resource inventory, potential savings and cleanup trade-offs.
-
-The current scripts are:
-- `cost_cleanup.sh` — identifies unassociated Elastic IPs, detached volumes, older snapshots, load balancers and cost data. The script **defaults to dry-run** and requires explicit `--execute` confirmation for destructive operations.
-- `spot_instances.sh` — demonstrates creation of a mixed-instances Auto Scaling Group and an **illustrative**, static price calculation. Its prices are not current live AWS quotes.
-
-**Warning:** never run `--execute` in a shared account without validating ownership, retention requirements, backup restoreability and deletion impact. The original lab README references additional cleanup/reporting helpers not currently present.
-
-## Prerequisites and safe workflow
-
-- AWS account with a **dedicated sandbox**, billing alerts and least-privilege IAM.
-- AWS CLI configured for the intended account and region.
-- Bash and basic understanding of AWS networking, IAM and resource cost.
-- An inventory and teardown plan **before** provisioning.
+Always verify credentials and region before any experiment:
 
 ```bash
-git clone https://github.com/gaddah-yousef/AWS_Projets.git
-cd AWS_Projets
-
-# Non-destructive inspection first:
-find . -name '*.sh' -type f -print
 aws sts get-caller-identity
 aws configure get region
 
-# Explicit syntax check of locally reviewed scripts:
-bash -n 01_AWS_Cloud_Secure_WebApp/scripts/setup_vpc.sh
-bash -n 03_AWS_VPN_Site_to_Site/scripts/setup_vpn.sh
-bash -n 04_AWS_Cost_Optimization/scripts/cost_cleanup.sh
+# Safe, offline syntax checks:
+find . -name '*.sh' -type f -print0 | xargs -0 -n1 bash -n
 ```
 
-**No AWS deployment has been performed as part of this documentation update.** Resource creation can incur charges even if the terminal later reports an error.
+The repository now includes [static GitHub Actions validation](.github/workflows/validate.yml) for Bash syntax. **Static checks do not prove the AWS APIs will accept the infrastructure configuration.**
 
-## Security and engineering improvements
+## Corrected scripts and safeguards
 
-1. Replace hard-coded IDs and regions with validated parameters and environment templates.
-2. Implement missing guide commands or remove their references in the sub-lab READMEs.
-3. Add automated shell linting (`shellcheck`) and integration tests against isolated disposable environments.
-4. Introduce Terraform modules, state handling and controlled tear-down, where appropriate.
-5. Add AWS Config, CloudTrail and GuardDuty observability, with clear enabling and cost instructions.
-6. Record validated screenshots, evidence and per-lab cost measurements without committing account IDs or secrets.
-7. Add explicit resource tagging, ownership and deletion-protection policies.
+- **Secure Web App:** the VPC setup selects AZs for the specified region and requires a valid Flow Logs IAM role; compute deploy requires an existing AMI and SSH key, and does not redirect HTTP to a nonexistent HTTPS listener.
+- **RDS:** credentials are requested through AWS-managed Secrets Manager rather than being generated and embedded in a shell variable; version and cost consent are explicit.
+- **WAF:** the ALB is resolved by its AWS name; the S3 log bucket uses the prefix required by WAF.
+- **Networking:** a read-only peering and route inspection helper is provided; a working end-to-end ping still needs test instances.
+- **VPN:** real customer and VPC identifiers are mandatory; exported tunnel configuration is restricted and ignored by Git.
+- **FinOps:** cost reports, an opt-in lifecycle example and tag-scoped cleanup review are available. Automatic deletion of EBS snapshots or volumes is deliberately excluded.
 
-## Skills demonstrated
+## Safety and cost boundaries
 
-**AWS networking · Cloud security architecture · IAM/least privilege concepts · Secure workload segmentation · Site-to-Site VPN concepts · Bash automation · FinOps practices.**
+1. **Do not execute** these scripts in shared accounts, customer environments or production.
+2. NAT Gateways, interface endpoints, ALBs, WAF, RDS, EC2 and VPNs may incur hourly charges.
+3. AWS scripts are **not fully idempotent**; interrupted executions may leave resources behind.
+4. Scripts that provision costly components require explicit review and selected interactive confirmation, but this is **not a replacement for IAM and budget guardrails**.
+5. Do not store VPN secrets, customer configuration, AWS credentials or cost exports in Git.
+6. Read-only reporting is distinct from infrastructure provisioning; check each command's AWS permissions and scope.
 
-**Author:** [Yousef Gaddah](https://github.com/gaddah-yousef) — student cloud security portfolio.
+## Engineering roadmap
+
+- Migrate all deployment scenarios to reproducible Terraform modules with policy tests.
+- Add optional teardown scripts with resource tagging and protection against accidental deletion.
+- Provide automated checks for cloud configuration drift and IAM least privilege.
+- Create sanitized validation evidence (screenshots, service outputs and exact AWS costs).
+- Document cross-account and region-safe deployment strategies.
+- Verify all flows against an actual authorized sandbox before claiming operational completion.
+
+## Interview/demo presentation
+
+Present one lab at a time: **design decisions → security boundary → automation script → validation outputs → cost and security limitations → remediation**.
+
+**Author:** [Yousef Gaddah](https://github.com/gaddah-yousef) — Cybersecurity & Cloud Computing portfolio.
