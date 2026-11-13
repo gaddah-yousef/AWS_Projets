@@ -4,10 +4,19 @@
 # =============================================================
 set -euo pipefail
 
-REGION="us-east-1"
-PROJECT="SecureWebApp"
-# Remplacer par l'ARN de votre ALB
-ALB_ARN="${ALB_ARN:-arn:aws:elasticloadbalancing:us-east-1:ACCOUNT_ID:loadbalancer/app/${PROJECT}-ALB/xxxx}"
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+export AWS_DEFAULT_REGION="$REGION"
+PROJECT="${PROJECT:-SecureWebApp}"
+# Resolve the real ALB ARN; never use placeholder account IDs.
+ALB_ARN="${ALB_ARN:-$(aws elbv2 describe-load-balancers \
+  --names "${PROJECT}-ALB" --query 'LoadBalancers[0].LoadBalancerArn' --output text)}"
+[[ "$ALB_ARN" == arn:aws:elasticloadbalancing:* ]] || {
+  echo "Valid ALB_ARN required" >&2; exit 1;
+}
+echo "Account: $(aws sts get-caller-identity --query Account --output text)"
+echo "Region: $REGION, ALB: $ALB_ARN"
+read -r -p "Creates billable AWS WAF resources. Type CREATE: " CONFIRM
+[[ "$CONFIRM" == "CREATE" ]] || { echo "Cancelled."; exit 1; }
 
 echo "=== [1/3] Création Web ACL WAF ==="
 WAF_ARN=$(aws wafv2 create-web-acl \
@@ -78,13 +87,21 @@ echo "WAF associé à l'ALB"
 
 echo "=== [3/3] Activation des logs WAF vers S3 ==="
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-BUCKET_NAME="waf-logs-${PROJECT,,}-${ACCOUNT}"
-aws s3 mb s3://${BUCKET_NAME} --region $REGION 2>/dev/null || true
+BUCKET_NAME="aws-waf-logs-${PROJECT,,}-${ACCOUNT}-${REGION}"
+if ! aws s3api head-bucket --bucket "$BUCKET_NAME" >/dev/null 2>&1; then
+  aws s3 mb "s3://$BUCKET_NAME" --region "$REGION"
+fi
+aws s3api put-public-access-block --bucket "$BUCKET_NAME" \
+  --public-access-block-configuration \
+  BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+aws s3api put-bucket-encryption --bucket "$BUCKET_NAME" \
+  --server-side-encryption-configuration \
+  '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 aws s3api put-bucket-versioning --bucket $BUCKET_NAME \
   --versioning-configuration Status=Enabled
 aws wafv2 put-logging-configuration \
   --logging-configuration "ResourceArn=$WAF_ARN,LogDestinationConfigs=[arn:aws:s3:::${BUCKET_NAME}]" \
-  --region $REGION 2>/dev/null || echo "Logging WAF: droits S3 IAM requis"
+  --region "$REGION" || echo "WAF logging not enabled: review WAF/S3 IAM permissions."
 
 echo ""
 echo "=== WAF SETUP TERMINÉ ==="
