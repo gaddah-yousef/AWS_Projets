@@ -8,6 +8,7 @@ source /tmp/networking_ids.env
 
 echo "=== [1/2] Elastic IP + NAT Gateway pour VPC-A ==="
 EIP=$(aws ec2 allocate-address --domain vpc --query 'AllocationId' --output text)
+aws ec2 create-tags --resources "$EIP" --tags Key=Project,Value=NetworkLab Key=Name,Value=NetworkLab-NAT-EIP
 NAT=$(aws ec2 create-nat-gateway \
   --subnet-id $SUB_A_PUB \
   --allocation-id $EIP \
