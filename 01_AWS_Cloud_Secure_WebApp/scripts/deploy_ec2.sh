@@ -6,10 +6,15 @@ set -euo pipefail
 
 source /tmp/vpc_ids.env
 
-REGION="us-east-1"
-AMI_ID="ami-0c02fb55956c7d316"   # Amazon Linux 2 us-east-1
-INSTANCE_TYPE="t3.micro"
-KEY_NAME="my-keypair"            # Modifier avec votre clé
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+export AWS_DEFAULT_REGION="$REGION"
+: "${AMI_ID:?Set AMI_ID to an available image in your AWS region}"
+: "${KEY_NAME:?Set KEY_NAME to an existing EC2 key pair}"
+INSTANCE_TYPE="${INSTANCE_TYPE:-t3.micro}"
+aws ec2 describe-images --image-ids "$AMI_ID" --region "$REGION" \
+  --query 'Images[0].ImageId' --output text >/dev/null
+aws ec2 describe-key-pairs --key-names "$KEY_NAME" --region "$REGION" \
+  --query 'KeyPairs[0].KeyName' --output text >/dev/null
 PROJECT="SecureWebApp"
 MIN_SIZE=2
 MAX_SIZE=4
@@ -124,19 +129,29 @@ TG_ARN=$(aws elbv2 create-target-group \
   --query 'TargetGroups[0].TargetGroupArn' --output text)
 echo "Target Group : $TG_ARN"
 
-# Listener HTTP → redirect HTTPS
-aws elbv2 create-listener \
-  --load-balancer-arn $ALB_ARN \
-  --protocol HTTP --port 80 \
-  --default-actions Type=redirect,RedirectConfig='{Protocol=HTTPS,Port=443,StatusCode=HTTP_301}'
-
-# Listener HTTPS (nécessite certificat ACM)
-# CERT_ARN="arn:aws:acm:us-east-1:ACCOUNT:certificate/xxxx"
-# aws elbv2 create-listener \
-#   --load-balancer-arn $ALB_ARN \
-#   --protocol HTTPS --port 443 \
-#   --certificates CertificateArn=$CERT_ARN \
-#   --default-actions Type=forward,TargetGroupArn=$TG_ARN
+# Only redirect HTTP when HTTPS is actually enabled.
+# In lab-only mode with no certificate, keep HTTP accessible for validation.
+if [[ -n "${CERT_ARN:-}" ]]; then
+  CERT_STATUS="$(aws acm describe-certificate \
+    --certificate-arn "$CERT_ARN" --region "$REGION" \
+    --query Certificate.Status --output text)"
+  [[ "$CERT_STATUS" == "ISSUED" ]] || {
+    echo "ACM certificate is not ISSUED: $CERT_STATUS" >&2; exit 1;
+  }
+  aws elbv2 create-listener --load-balancer-arn "$ALB_ARN" \
+    --protocol HTTPS --port 443 \
+    --certificates CertificateArn="$CERT_ARN" \
+    --default-actions Type=forward,TargetGroupArn="$TG_ARN"
+  aws elbv2 create-listener --load-balancer-arn "$ALB_ARN" \
+    --protocol HTTP --port 80 \
+    --default-actions Type=redirect,RedirectConfig='{Protocol=HTTPS,Port=443,StatusCode=HTTP_301}'
+  echo "HTTPS listener active with ACM; HTTP redirects to HTTPS."
+else
+  aws elbv2 create-listener --load-balancer-arn "$ALB_ARN" \
+    --protocol HTTP --port 80 \
+    --default-actions Type=forward,TargetGroupArn="$TG_ARN"
+  echo "WARNING: HTTP-only lab. Export CERT_ARN before provisioning for HTTPS."
+fi
 
 echo "=== [4/5] Auto Scaling Group ==="
 aws autoscaling create-auto-scaling-group \
@@ -166,5 +181,8 @@ ALB_DNS=$(aws elbv2 describe-load-balancers \
   --query 'LoadBalancers[0].DNSName' --output text)
 echo ""
 echo "=== DÉPLOIEMENT EC2/ALB TERMINÉ ==="
-echo "URL Application : http://$ALB_DNS"
-echo "(HTTPS disponible après ajout du certificat ACM)"
+if [[ -n "${CERT_ARN:-}" ]]; then
+  echo "Application: https://$ALB_DNS (valid TLS hostname requires matching domain)"
+else
+  echo "Lab application: http://$ALB_DNS (unencrypted)"
+fi
