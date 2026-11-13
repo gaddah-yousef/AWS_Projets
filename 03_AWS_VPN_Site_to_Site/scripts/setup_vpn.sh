@@ -4,14 +4,21 @@
 # Crée: VGW, CGW, VPN Connection, routes et monitoring
 # =============================================================
 set -euo pipefail
+umask 077
+export AWS_DEFAULT_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 
-REGION="us-east-1"
-CUSTOMER_IP="${CUSTOMER_IP:-1.2.3.4}"         # IP publique du routeur on-prem
+REGION="$AWS_DEFAULT_REGION"
+: "${CUSTOMER_IP:?Export CUSTOMER_IP (public IP of your authorized on-prem gateway)}"
 CUSTOMER_ASN="${CUSTOMER_ASN:-65000}"
 AWS_ASN="64512"
 ONPREM_CIDR="${ONPREM_CIDR:-192.168.0.0/24}"
-VPC_ID="${VPC_ID:-vpc-XXXXXXXX}"              # Modifier
-PRIV_RT_ID="${PRIV_RT_ID:-rtb-XXXXXXXX}"     # Route table du subnet privé
+ : "${VPC_ID:?Export VPC_ID for your own VPC}"
+: "${PRIV_RT_ID:?Export PRIV_RT_ID for its private route table}"
+aws ec2 describe-vpcs --vpc-ids "$VPC_ID" >/dev/null
+aws ec2 describe-route-tables --route-table-ids "$PRIV_RT_ID" >/dev/null
+echo "AWS account $(aws sts get-caller-identity --query Account --output text), region $REGION"
+read -r -p "Site-to-Site VPN incurs hourly charges. Type CREATE: " CONSENT
+[[ "$CONSENT" == "CREATE" ]] || { echo "Cancelled."; exit 1; }
 
 echo "=== [1/6] Virtual Private Gateway ==="
 VGW=$(aws ec2 create-vpn-gateway \
@@ -84,8 +91,9 @@ echo "=== [6/6] Download config pour équipement on-premise ==="
 aws ec2 describe-vpn-connections \
   --vpn-connection-ids $VPN_ID \
   --query 'VpnConnections[0].CustomerGatewayConfiguration' \
-  --output text > /tmp/vpn_customer_config.xml
-echo "Configuration XML sauvegardée : /tmp/vpn_customer_config.xml"
+  --output text > "./vpn_customer_${VPN_ID}.xml"
+chmod 600 "./vpn_customer_${VPN_ID}.xml"
+echo "Configuration XML sensible sauvegardée : ./vpn_customer_${VPN_ID}.xml (chmod 600)"
 echo "(Importer dans Cisco/Fortinet/pfSense/StrongSwan)"
 
 echo ""
