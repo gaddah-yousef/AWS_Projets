@@ -1,0 +1,15 @@
+# Sensitive outputs generated during authorized AWS labs
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*_customer_*.xml
+vpn_customer_*.xml
+*vpn_customer*.xml
+*.tfstate
+*.tfstate.backup
+.terraform/
+aws_cost_report.csv
+costs_demo.csv
+*.log
