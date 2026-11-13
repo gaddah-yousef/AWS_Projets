@@ -4,15 +4,23 @@
 # Crée : VPC, Subnets (public/private), IGW, NAT, Route Tables
 # =============================================================
 set -euo pipefail
+umask 077
 
-REGION="us-east-1"
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+export AWS_DEFAULT_REGION="$REGION"
 VPC_CIDR="10.0.0.0/16"
 PUB_SUB1_CIDR="10.0.1.0/24"
 PUB_SUB2_CIDR="10.0.2.0/24"
 PRIV_SUB1_CIDR="10.0.10.0/24"
 PRIV_SUB2_CIDR="10.0.20.0/24"
-AZ1="us-east-1a"
-AZ2="us-east-1b"
+# Choose available AZs dynamically; hardcoded region suffixes are not universal.
+AZ1="$(aws ec2 describe-availability-zones --region "$REGION" \
+  --query 'AvailabilityZones[0].ZoneName' --output text)"
+AZ2="$(aws ec2 describe-availability-zones --region "$REGION" \
+  --query 'AvailabilityZones[1].ZoneName' --output text)"
+[[ "$AZ1" != "None" && "$AZ2" != "None" && "$AZ1" != "$AZ2" ]] || {
+  echo "Two availability zones are required." >&2; exit 1;
+}
 PROJECT="SecureWebApp"
 
 echo "=== [1/8] Création du VPC ==="
@@ -21,7 +29,7 @@ VPC_ID=$(aws ec2 create-vpc \
   --region $REGION \
   --query 'Vpc.VpcId' --output text)
 aws ec2 create-tags --resources $VPC_ID --tags Key=Name,Value="${PROJECT}-VPC"
-aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id "$VPC_ID" --enable-dns-hostnames '{"Value":true}'
 echo "VPC créé : $VPC_ID"
 
 echo "=== [2/8] Création des Subnets ==="
@@ -52,6 +60,7 @@ echo "IGW : $IGW"
 
 echo "=== [4/8] Elastic IP + NAT Gateway ==="
 EIP=$(aws ec2 allocate-address --domain vpc --query 'AllocationId' --output text)
+aws ec2 create-tags --resources "$EIP" --tags Key=Project,Value="$PROJECT" Key=Name,Value="${PROJECT}-NAT-EIP"
 NAT=$(aws ec2 create-nat-gateway --subnet-id $PUB1 --allocation-id $EIP \
   --query 'NatGateway.NatGatewayId' --output text)
 aws ec2 create-tags --resources $NAT --tags Key=Name,Value="${PROJECT}-NAT"
@@ -76,13 +85,19 @@ aws ec2 associate-route-table --route-table-id $PRIV_RT --subnet-id $PRIV2
 echo "Route Tables configurées"
 
 echo "=== [6/8] VPC Flow Logs ==="
-aws ec2 create-flow-logs \
-  --resource-type VPC \
-  --resource-ids $VPC_ID \
-  --traffic-type ALL \
-  --log-destination-type cloud-watch-logs \
-  --log-group-name "/aws/vpc/flowlogs/${PROJECT}" \
-  --deliver-logs-permission-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/FlowLogsRole 2>/dev/null || echo "Flow logs: rôle IAM requis (FlowLogsRole)"
+# A CloudWatch Logs IAM delivery role is required; do not invent an ARN.
+if [[ -n "${FLOW_LOGS_ROLE_ARN:-}" ]]; then
+  LOG_GROUP="/aws/vpc/flowlogs/${PROJECT}"
+  aws logs create-log-group --log-group-name "$LOG_GROUP" 2>/dev/null || true
+  aws ec2 create-flow-logs \
+    --resource-type VPC --resource-ids "$VPC_ID" --traffic-type ALL \
+    --log-destination-type cloud-watch-logs \
+    --log-group-name "$LOG_GROUP" \
+    --deliver-logs-permission-arn "$FLOW_LOGS_ROLE_ARN"
+  echo "Flow Logs request submitted to CloudWatch Logs."
+else
+  echo "Flow Logs SKIPPED: export FLOW_LOGS_ROLE_ARN (with correct IAM permissions)."
+fi
 
 echo "=== [7/8] Security Groups ==="
 # SG ALB - accès public 80/443

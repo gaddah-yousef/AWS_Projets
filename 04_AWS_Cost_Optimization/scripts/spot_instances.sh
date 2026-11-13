@@ -5,9 +5,17 @@
 # =============================================================
 set -euo pipefail
 
-REGION="us-east-1"
-AMI_ID="ami-0c02fb55956c7d316"  # Amazon Linux 2
-SUBNET_IDS="${SUBNET_IDS:-subnet-XXXX,subnet-YYYY}"
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+export AWS_DEFAULT_REGION="$REGION"
+: "${AMI_ID:?Export AMI_ID (existing compatible EC2 AMI)}"
+: "${SUBNET_IDS:?Export SUBNET_IDS as comma-separated existing subnets}"
+IFS=',' read -ra SUBNET_ARRAY <<< "$SUBNET_IDS"
+aws ec2 describe-images --image-ids "$AMI_ID" >/dev/null
+aws ec2 describe-subnets --subnet-ids "${SUBNET_ARRAY[@]}" >/dev/null
+echo "Account: $(aws sts get-caller-identity --query Account --output text)"
+echo "Region=$REGION AMI=$AMI_ID Subnets=$SUBNET_IDS"
+read -r -p "Spot and On-Demand instances are billable. Type CREATE: " CONSENT
+[[ "$CONSENT" == "CREATE" ]] || { echo "Cancelled"; exit 1; }
 PROJECT="CostOpt"
 
 echo "=== [1/3] Launch Template avec Spot ==="
@@ -56,23 +64,7 @@ aws autoscaling create-auto-scaling-group \
 
 echo "Auto Scaling Group mixte créé"
 
-echo "=== [3/3] Estimation des économies ==="
-ON_DEMAND_PRICE=0.0116  # t3.micro us-east-1 $/heure
-SPOT_PRICE=0.0014       # t3.micro Spot typique
-INSTANCES=4
-HOURS_MONTH=730
-
-ON_DEMAND_TOTAL=$(echo "$INSTANCES * $ON_DEMAND_PRICE * $HOURS_MONTH" | bc)
-# Mix: 1 OD + 3 Spot
-MIXED_TOTAL=$(echo "(1 * $ON_DEMAND_PRICE + 3 * $SPOT_PRICE) * $HOURS_MONTH" | bc)
-
-echo ""
-echo "=== SPOT INSTANCES CONFIGURÉES ==="
-echo "Configuration: 1 On-Demand + 3 Spot (capacity-optimized)"
-echo "Stratégie allocation: capacity-optimized (moins d'interruptions)"
-echo ""
-echo "Estimation économies mensuelles:"
-echo "  On-Demand uniquement : ~\$$ON_DEMAND_TOTAL/mois"
-echo "  Mix OD+Spot          : ~\$$MIXED_TOTAL/mois"
-echo ""
-echo "Types Spot acceptés: t3.micro, t3a.micro, t2.micro (diversification)"
+echo "=== [3/3] Pricing warning ==="
+echo "Spot pricing and interruption rates change continuously."
+echo "Inspect current AWS EC2 Spot prices and Cost Explorer before relying on savings."
+echo "Resources have been requested; verify instances and clean them up after the lab."
